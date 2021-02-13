@@ -138,7 +138,7 @@ local function CalcFlight(Missile)
 	local Dir = Missile.CurDir
 	local LastVel = Missile.LastVel
 	local LastSpeed = LastVel:Length()
-	local VelNorm = LastVel / LastSpeed
+	local VelNorm = LastVel:GetNormalized()
 
 	Missile.LastThink = Time
 
@@ -380,8 +380,11 @@ function MakeACF_Missile(Player, Pos, Ang, Rack, MountPoint, Crate)
 
 	if Missile.NoThrust then
 		Missile.MotorLength = 0
+		Missile.SpeedBoost = 0
 	else
-		Missile.MotorLength = (1 - Missile.StarterPercent) * Missile.BulletData.PropMass / (Missile.FuelConsumption * Missile.MaxThrust)
+		local TotalLength = Missile.BulletData.PropMass / (Missile.FuelConsumption * Missile.MaxThrust)
+		Missile.MotorLength = (1 - Missile.StarterPercent) * TotalLength
+		Missile.SpeedBoost = Missile.StarterPercent * TotalLength * Missile.MaxThrust
 	end
 
 	do -- Exhaust pos
@@ -446,12 +449,14 @@ function ENT:Launch(Delay, IsMisfire)
 	local Point      = self.MountPoint
 	local Rack       = self.Launcher
 	local Flight     = BulletData.Flight or self:LocalToWorldAngles(Point.Angle):Forward()
-	local Velocity   = Flight + (Rack.Velocity:Length() * Flight)
 	local DeltaTime  = engine.TickInterval()
 
 	if Rack.SoundPath and Rack.SoundPath ~= "" then
 		self.Sound = Rack.SoundPath
 	end
+
+	-- Apply the starter boost to the missile's velocity
+	local Velocity = Rack.Velocity + self.SpeedBoost * Flight
 
 	BulletData.Flight = Velocity
 	BulletData.Pos    = Rack:LocalToWorld(Point.Position)
@@ -641,7 +646,7 @@ function ENT:ACF_Activate(Recalc)
 	self.ACF.Type      = "Prop"
 end
 
-function ENT:ACF_OnDamage(Bullet, Trace)
+function ENT:ACF_OnDamage(Energy, FrArea, Angle, Inflictor)
 	if self.Detonated or self.NoDamage then
 		return {
 			Damage = 0,
@@ -651,12 +656,11 @@ function ENT:ACF_OnDamage(Bullet, Trace)
 		}
 	end
 
-	local HitRes = ACF.PropDamage(Bullet, Trace) --Calling the standard damage prop function
-	local Owner  = Bullet.Owner
+	local HitRes = ACF.PropDamage(self, Energy, FrArea, Angle, Inflictor) --Calling the standard damage prop function
 
 	-- If the missile was destroyed, then we detonate it.
 	if HitRes.Kill then
-		DetonateMissile(self, Owner)
+		DetonateMissile(self, Inflictor)
 
 		return HitRes
 	elseif HitRes.Overkill > 0 then
@@ -665,7 +669,7 @@ function ENT:ACF_OnDamage(Bullet, Trace)
 
 		-- We give it a chance to explode when it gets penetrated aswell.
 		if math.random() > 0.75 * Ratio then
-			DetonateMissile(self, Owner)
+			DetonateMissile(self, Inflictor)
 
 			return HitRes
 		end
